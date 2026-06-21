@@ -1,0 +1,20 @@
+# Local secrets
+zai.conf
+*.token
+*.secret
+.env
+
+# Runtime state/cache
+.cache/
+state.json
+*.raw.json
+*.tmp
+
+# Backups
+*.bak
+*.backup
+*.orig
+
+# Editor/system
+.DS_Store
+.Trash-*

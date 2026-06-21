@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -u
+
+CACHE_DIR="$HOME/.cache/ai-usage-ui"
+STATE="$CACHE_DIR/state.json"
+mkdir -p "$CACHE_DIR"
+
+if [[ ! -s "$STATE" ]]; then
+  cat > "$STATE" <<'JSON'
+{
+  "claude": {"mode": "auto"},
+  "codex": {"mode": "auto"},
+  "zai": {"mode": "auto"}
+}
+JSON
+fi
+
+svc="${1:-}"
+browser="${WAYBAR_AI_BROWSER:-firefox}"
+
+emit_json() {
+  local text="$1"
+  local class="$2"
+  local tooltip="${3:-Left: detail · Right: mode · Middle: settings · Scroll: cycle}"
+  jq -cn --arg text "$text" --arg class "$class" --arg tooltip "$tooltip" \
+    '{text:$text, tooltip:$tooltip, class:$class}'
+}
+
+get_mode() {
+  jq -r --arg svc "$svc" '.[$svc].mode // "auto"' "$STATE" 2>/dev/null
+}
+
+class_from_max() {
+  local svc="$1"
+  local maxp="$2"
+
+  if [[ ! "$maxp" =~ ^[0-9]+$ ]]; then
+    echo "critical"
+  elif (( maxp >= 95 )); then
+    echo "critical"
+  elif (( maxp >= 80 )); then
+    echo "${svc}-high"
+  elif (( maxp >= 50 )); then
+    echo "${svc}-mid"
+  else
+    echo "${svc}-low"
+  fi
+}
+
+render_metrics() {
+  local metrics="$1"
+  local mode="$2"
+
+  jq -r --arg mode "$mode" '
+    def maxp: if .h5_pct > .d7_pct then .h5_pct else .d7_pct end;
+    def risk:
+      if maxp >= 95 then "STOP"
+      elif maxp >= 80 then "HIGH"
+      elif maxp >= 50 then "MID"
+      else "OK"
+      end;
+
+    if $mode == "5h" then
+      "\(.h5_pct)% \(.h5_left_h)/5"
+    elif $mode == "7d" then
+      "\(.d7_pct)% \(.d7_left_d)/7"
+    elif $mode == "dual" then
+      "\(.h5_pct)/\(.d7_pct)"
+    elif $mode == "eta" then
+      if .d7_pct >= 80 then "\(.d7_left_d)d" else "\(.h5_left_h)h" end
+    elif $mode == "risk" then
+      risk
+    else
+      if .d7_pct >= 80 then
+        "\(.d7_pct)% \(.d7_left_d)/7"
+      else
+        "\(.h5_pct)% \(.h5_left_h)/5"
+      end
+    end
+  ' <<< "$metrics"
+}
+
+tooltip_metrics() {
+  local metrics="$1"
+  local mode="$2"
+
+  jq -r --arg mode "$mode" '
+    def maxp: if .h5_pct > .d7_pct then .h5_pct else .d7_pct end;
+    def risk:
+      if maxp >= 95 then "STOP"
+      elif maxp >= 80 then "HIGH"
+      elif maxp >= 50 then "MID"
+      else "OK"
+      end;
+    def bar($p; $w):
+      (($p / 100 * $w) | round) as $f
+      | ("▰" * $f) + ("▱" * ($w - $f));
+
+    "Mode \($mode) · \(risk)
+
+"
+    + "󱐋 5h   \(.h5_pct)%   " + bar(.h5_pct; 12) + "
+"
+    + "         \(.h5_exact) left
+
+"
+    + "󰃭 · 7d   \(.d7_pct)%   " + bar(.d7_pct; 12) + "
+"
+    + "         \(.d7_exact) left"
+    + (if .peak != null then "
+
+" + .peak else "" end)
+    + "
+
+L details · R mode · M settings · Wheel cycle"
+  ' <<< "$metrics"
+}
+
+metrics_claude_codex() {
+  local svc="$1"
+  local raw
+  raw="$("$HOME/.local/bin/${svc}-usage" --waybar --browser "$browser" 2>/dev/null || true)"
+
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+
+  LC_TIME=C jq -c '
+    .tooltip
+    | gsub("\n"; " ")
+    | gsub("  +"; " ") as $t
+    | ($t|capture("5-Hour (?<p>[0-9]+)% (?<h>[0-9]+)h(?<m>[0-9]+)m")) as $h
+    | ($t|capture("7-Day (?<p>[0-9]+)% (?<d>[0-9]+)d(?<hh>[0-9]+)h")) as $w
+    | {
+        h5_pct: ($h.p|tonumber),
+        h5_left_h: (($h.h|tonumber) + (if ($h.m|tonumber) >= 30 then 1 else 0 end)),
+        h5_exact: "\($h.h)h \($h.m)m",
+        d7_pct: ($w.p|tonumber),
+        d7_left_d: ($w.d|tonumber),
+        d7_left_h: ($w.hh|tonumber),
+        d7_exact: "\($w.d)d \($w.hh)h",
+        peak: null
+      }
+  ' <<< "$raw"
+}
+
+fetch_zai_raw() {
+  local cache="$CACHE_DIR/zai.raw.json"
+  local conf="$HOME/.config/waybar-ai-usage/zai.conf"
+  local token
+  local now
+  local mtime=0
+
+  now="$(date +%s)"
+
+  if [[ -f "$cache" ]]; then
+    mtime="$(stat -c %Y "$cache" 2>/dev/null || echo 0)"
+  fi
+
+  if [[ -f "$cache" && $((now - mtime)) -lt 60 ]]; then
+    cat "$cache"
+    return 0
+  fi
+
+  token="$(awk -F= '/^ZAI_TOKEN=/{print $2; exit}' "$conf" 2>/dev/null)"
+
+  if [[ -z "${token:-}" ]]; then
+    return 1
+  fi
+
+  curl -fsS 'https://api.z.ai/api/monitor/usage/quota/limit' \
+    -H "Authorization: Bearer $token" \
+    -H 'Accept-Language: en-US,en' \
+    -o "$cache.tmp" 2>/dev/null || return 1
+
+  mv "$cache.tmp" "$cache"
+  cat "$cache"
+}
+
+metrics_zai() {
+  local raw
+  raw="$(fetch_zai_raw)" || return 1
+
+  LC_TIME=C jq -c '
+    now as $n
+    | (.data.limits|map(select(.unit==3))[0] // {}) as $h
+    | (.data.limits|map(select(.unit==6))[0] // {}) as $w
+    | ($n - ($n % 86400)) as $mid
+    | ($mid + 6*3600) as $ps
+    | ($mid + 10*3600) as $pe
+    | (if ($n >= $ps and $n < $pe) then "◆ PEAK" else "◆ off-peak" end) as $pk
+    | (($h.nextResetTime // 0)/1000) as $ht
+    | (($w.nextResetTime // 0)/1000) as $wt
+    | {
+        h5_pct: (($h.percentage // 0)|round),
+        h5_left_h: (if $ht > $n then (((($ht-$n)/3600)+0.5)|floor) else 0 end),
+        h5_exact: (if $ht > $n then "\((($ht-$n)/3600)|floor)h" else "full" end),
+        d7_pct: (($w.percentage // 0)|round),
+        d7_left_d: (if $wt > $n then ((($wt-$n)/86400)|floor) else 0 end),
+        d7_left_h: (if $wt > $n then (((($wt-$n)%86400)/3600)|floor) else 0 end),
+        d7_exact: (if $wt > $n then "\((($wt-$n)/86400)|floor)d \((((($wt-$n)%86400)/3600)|floor))h" else "full" end),
+        peak: ($pk + " · " + ($ps|strflocaltime("%H:%M")) + "–" + ($pe|strflocaltime("%H:%M")))
+      }
+  ' <<< "$raw"
+}
+
+case "$svc" in
+  claude|codex)
+    mode="$(get_mode)"
+    metrics="$(metrics_claude_codex "$svc" 2>/dev/null || true)"
+
+    if [[ -z "${metrics:-}" ]]; then
+      emit_json "${svc}: err" "critical" "Auth or parse error. Left: details · Middle: settings"
+      exit 0
+    fi
+
+    text="$(render_metrics "$metrics" "$mode")"
+    tooltip="$(tooltip_metrics "$metrics" "$mode")"
+    maxp="$(jq -r 'if .h5_pct > .d7_pct then .h5_pct else .d7_pct end' <<< "$metrics")"
+    cls="$(class_from_max "$svc" "$maxp")"
+    emit_json "$text" "$cls" "$tooltip"
+    ;;
+
+  zai)
+    mode="$(get_mode)"
+    metrics="$(metrics_zai 2>/dev/null || true)"
+
+    if [[ -z "${metrics:-}" ]]; then
+      emit_json "z.ai err" "critical" "Auth or network error. Check ZAI_TOKEN."
+      exit 0
+    fi
+
+    text="$(render_metrics "$metrics" "$mode")"
+    tooltip="$(tooltip_metrics "$metrics" "$mode")"
+    maxp="$(jq -r 'if .h5_pct > .d7_pct then .h5_pct else .d7_pct end' <<< "$metrics")"
+    cls="$(class_from_max "zai" "$maxp")"
+    emit_json "$text" "$cls" "$tooltip"
+    ;;
+
+  *)
+    emit_json "ai err" "critical" "Unknown service: $svc"
+    ;;
+esac

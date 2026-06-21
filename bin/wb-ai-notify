@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -u
+
+svc="${1:-}"
+browser="${WAYBAR_AI_BROWSER:-firefox}"
+
+notify_common() {
+  local title="$1"
+  local cmd="$2"
+  local width="$3"
+
+  raw="$($cmd --waybar --browser "$browser" 2>/dev/null || true)"
+
+  if [[ -z "$raw" ]]; then
+    notify-send "✦ $title" "No output from $cmd"
+    exit 0
+  fi
+
+  body="$(LC_TIME=C jq -r --argjson width "$width" '
+    try (
+      .tooltip
+      | gsub("\n"; " ")
+      | gsub("  +"; " ") as $t
+      | now as $n
+      | ($t|capture("5-Hour (?<p>[0-9]+)% (?<h>[0-9]+)h(?<m>[0-9]+)m")) as $h
+      | ($t|capture("7-Day (?<p>[0-9]+)% (?<d>[0-9]+)d(?<hh>[0-9]+)h")) as $w
+      | ($n + ($h.h|tonumber)*3600 + ($h.m|tonumber)*60) as $he
+      | ($n + ($w.d|tonumber)*86400 + ($w.hh|tonumber)*3600) as $we
+      | ($h.p|tonumber) as $hp
+      | ($w.p|tonumber) as $wp
+      | (($hp/100*$width)|round) as $hf
+      | (($wp/100*$width)|round) as $wf
+      | "<b>󱐋  5h</b>  │  <font size=\"5\"><b>\($hp)%</b></font>  │  <font size=\"4\">"
+        + ("█"*$hf) + ("░"*($width-$hf))
+        + "</font><br><i>  \($h.h)h \($h.m)m left  ·  \($he|strflocaltime("%a %-d %b · %H:%M"))</i>"
+        + "<br><br><b>󰃭 · 7d</b>  │  <font size=\"5\"><b>\($wp)%</b></font>  │  <font size=\"4\">"
+        + ("█"*$wf) + ("░"*($width-$wf))
+        + "</font><br><i>  \($w.d)d \($w.hh)h left  ·  \($we|strflocaltime("%a %-d %b · %H:%M"))</i>"
+    )
+    catch (
+      .tooltip // .text // "Unable to parse usage output"
+    )
+  ' <<< "$raw")"
+
+  notify-send "✦ $title" "$body"
+}
+
+notify_zai() {
+  conf="$HOME/.config/waybar-ai-usage/zai.conf"
+  token="$(awk -F= '/^ZAI_TOKEN=/{print $2; exit}' "$conf" 2>/dev/null)"
+
+  if [[ -z "${token:-}" ]]; then
+    notify-send "✦ z.ai" "Missing ZAI_TOKEN in $conf"
+    exit 0
+  fi
+
+  raw="$(curl -fsS 'https://api.z.ai/api/monitor/usage/quota/limit' \
+    -H "Authorization: Bearer $token" \
+    -H 'Accept-Language: en-US,en' 2>/dev/null || true)"
+
+  if [[ -z "$raw" ]]; then
+    notify-send "✦ z.ai" "No response from z.ai quota API"
+    exit 0
+  fi
+
+  title_suffix="$(LC_TIME=C jq -r '
+    now as $n
+    | ($n - ($n % 86400)) as $mid
+    | ($mid + 6*3600) as $ps
+    | ($mid + 10*3600) as $pe
+    | (if ($n >= $ps and $n < $pe) then "◆ PEAK" else "◆ off-peak" end)
+      + "  (" + ($ps|strflocaltime("%H:%M")) + "–" + ($pe|strflocaltime("%H:%M")) + ")"
+  ' <<< "$raw")"
+
+  body="$(LC_TIME=C jq -r '
+    now as $n
+    | (.data.limits|map(select(.unit==3))[0]) as $h
+    | (.data.limits|map(select(.unit==6))[0]) as $w
+    | ($h.percentage // 0) as $hp
+    | ($w.percentage // 0) as $wp
+    | (($hp/100*14)|round) as $hf
+    | (($wp/100*14)|round) as $wf
+    | (($h.nextResetTime // 0)/1000) as $ht
+    | (($w.nextResetTime // 0)/1000) as $wt
+    | (if $ht>0 then "\((($ht-$n)/3600)|floor)h left  ·  \($ht|strflocaltime("%a %-d %b · %H:%M"))" else "just reset · full quota" end) as $hr
+    | (if $wt>0 then "\((($wt-$n)/86400)|floor)d left  ·  \($wt|strflocaltime("%a %-d %b · %H:%M"))" else "just reset · full quota" end) as $wr
+    | "<b>󱐋  5h</b>  │  <font size=\"5\"><b>\($hp)%</b></font>  │  <font size=\"4\">"
+      + ("█"*$hf) + ("░"*(14-$hf))
+      + "</font><br><i>  \($hr)</i><br><br><b>󰃭 · 7d</b>  │  <font size=\"5\"><b>\($wp)%</b></font>  │  <font size=\"4\">"
+      + ("█"*$wf) + ("░"*(14-$wf))
+      + "</font><br><i>  \($wr)</i>"
+  ' <<< "$raw")"
+
+  notify-send "✦ z.ai  ·  $title_suffix" "$body"
+}
+
+case "$svc" in
+  claude)
+    notify_common "Claude" "$HOME/.local/bin/claude-usage" 14
+    ;;
+  codex)
+    notify_common "Codex" "$HOME/.local/bin/codex-usage" 14
+    ;;
+  zai)
+    notify_zai
+    ;;
+  *)
+    notify-send "✦ AI usage" "Unknown service: $svc"
+    ;;
+esac

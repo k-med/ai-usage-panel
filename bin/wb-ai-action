@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -u
+
+CACHE_DIR="$HOME/.cache/ai-usage-ui"
+STATE="$CACHE_DIR/state.json"
+mkdir -p "$CACHE_DIR"
+
+if [[ ! -s "$STATE" ]]; then
+  cat > "$STATE" <<'JSON'
+{
+  "claude": {"mode": "auto"},
+  "codex": {"mode": "auto"},
+  "zai": {"mode": "auto"}
+}
+JSON
+fi
+
+svc="${1:-}"
+action="${2:-notify}"
+arg="${3:-}"
+
+modes=(auto 5h 7d dual eta risk)
+
+get_mode() {
+  jq -r --arg svc "$svc" '.[$svc].mode // "auto"' "$STATE" 2>/dev/null
+}
+
+set_mode() {
+  local mode="$1"
+  tmp="$(mktemp)"
+  jq --arg svc "$svc" --arg mode "$mode" '
+    .[$svc].mode = $mode
+  ' "$STATE" > "$tmp" && mv "$tmp" "$STATE"
+}
+
+cycle_mode() {
+  local dir="${1:-next}"
+  local cur
+  local i
+  local next_i
+
+  cur="$(get_mode)"
+  i=0
+
+  for idx in "${!modes[@]}"; do
+    if [[ "${modes[$idx]}" == "$cur" ]]; then
+      i="$idx"
+      break
+    fi
+  done
+
+  if [[ "$dir" == "prev" ]]; then
+    next_i=$(( (i - 1 + ${#modes[@]}) % ${#modes[@]} ))
+  else
+    next_i=$(( (i + 1) % ${#modes[@]} ))
+  fi
+
+  set_mode "${modes[$next_i]}"
+}
+
+refresh_service() {
+  case "$svc" in
+    claude)
+      rm -f "$HOME/.cache/waybar-ai-usage/claude.json" "$HOME/.cache/waybar-ai-usage/claude.updating"
+      ;;
+    codex)
+      rm -f "$HOME/.cache/waybar-ai-usage/codex.json" "$HOME/.cache/waybar-ai-usage/codex.updating"
+      ;;
+    zai)
+      rm -f "$CACHE_DIR/zai.raw.json" "$CACHE_DIR/zai.raw.json.tmp"
+      ;;
+  esac
+
+  "$HOME/.local/bin/wb-ai-text" "$svc" >/dev/null 2>&1 || true
+  notify-send "✦ ${svc}" "Refreshed"
+}
+
+case "$action" in
+  notify)
+    exec "$HOME/.local/bin/wb-ai-notify" "$svc"
+    ;;
+
+  cycle-mode|cycle)
+    cycle_mode next
+    ;;
+
+  prev)
+    cycle_mode prev
+    ;;
+
+  refresh)
+    refresh_service
+    ;;
+
+  scroll)
+    if [[ "$arg" == -* ]]; then
+      cycle_mode prev
+    else
+      cycle_mode next
+    fi
+    ;;
+
+  open)
+    case "$svc" in
+      claude) xdg-open "https://claude.ai" >/dev/null 2>&1 & ;;
+      codex) xdg-open "https://chatgpt.com" >/dev/null 2>&1 & ;;
+      zai) xdg-open "https://z.ai" >/dev/null 2>&1 & ;;
+    esac
+    ;;
+
+  *)
+    notify-send "✦ AI usage" "Unknown action: $action"
+    ;;
+esac

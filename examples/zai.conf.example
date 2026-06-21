@@ -1,0 +1,7 @@
+# Copy this file to:
+#   ~/.config/waybar-ai-usage/zai.conf
+#
+# Then paste your z.ai token below.
+# Do not commit your real token.
+
+ZAI_TOKEN=replace_me
