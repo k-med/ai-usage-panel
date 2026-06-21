@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="${AI_USAGE_PANEL_REPO:-$HOME/src/ai-usage-panel}"
+DO_COMMIT=0
+DO_PUSH=0
+DRY_RUN=0
+COMMIT_MSG="Export live AI usage scripts"
+
+usage() {
+  cat <<HELP
+ai-usage-export
+
+Copy the currently installed live scripts from ~/.local/bin back into the
+ai-usage-panel source repo.
+
+Usage:
+  ai-usage-export
+  ai-usage-export --commit
+  ai-usage-export --commit --push
+  ai-usage-export --repo ~/src/ai-usage-panel
+  ai-usage-export --dry-run
+
+Options:
+  --repo PATH       Source repo path. Default: ~/src/ai-usage-panel
+  --commit         Commit copied changes
+  --push           Push after commit
+  -m, --message    Commit message
+  --dry-run        Show what would be copied
+  -h, --help       Show help
+
+Environment:
+  AI_USAGE_PANEL_REPO=/custom/path
+HELP
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo)
+      REPO="${2:?Missing repo path}"
+      shift 2
+      ;;
+    --commit)
+      DO_COMMIT=1
+      shift
+      ;;
+    --push)
+      DO_PUSH=1
+      DO_COMMIT=1
+      shift
+      ;;
+    -m|--message)
+      COMMIT_MSG="${2:?Missing commit message}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [ ! -d "$REPO" ]; then
+  echo "Repo not found: $REPO"
+  exit 1
+fi
+
+mkdir -p "$REPO/bin"
+
+FILES=(
+  "wb-ai-text"
+  "wb-ai-notify"
+  "wb-ai-action"
+  "ai-usage-export"
+)
+
+echo "Export target: $REPO"
+echo
+
+for name in "${FILES[@]}"; do
+  src="$HOME/.local/bin/$name"
+  dst="$REPO/bin/$name"
+
+  if [ "$name" = "ai-usage-export" ]; then
+    src="$0"
+  fi
+
+  if [ ! -f "$src" ]; then
+    echo "skip missing: $src"
+    continue
+  fi
+
+  echo "$src -> $dst"
+
+  if [ "$DRY_RUN" -eq 0 ]; then
+    install -m 0755 "$src" "$dst"
+  fi
+done
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo
+  echo "Dry run only. Nothing copied."
+  exit 0
+fi
+
+cd "$REPO"
+
+echo
+echo "Git status:"
+git status --short
+
+if [ "$DO_COMMIT" -eq 1 ]; then
+  git add bin/wb-ai-text bin/wb-ai-notify bin/wb-ai-action bin/ai-usage-export
+
+  if git diff --cached --quiet; then
+    echo "No changes to commit."
+  else
+    git commit -m "$COMMIT_MSG"
+  fi
+fi
+
+if [ "$DO_PUSH" -eq 1 ]; then
+  git push
+fi
+
+echo
+echo "Export complete."

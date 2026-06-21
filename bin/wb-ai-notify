@@ -17,29 +17,51 @@ notify_common() {
   fi
 
   body="$(LC_TIME=C jq -r --argjson width "$width" '
-    try (
-      .tooltip
-      | gsub("\n"; " ")
-      | gsub("  +"; " ") as $t
-      | now as $n
-      | ($t|capture("5-Hour (?<p>[0-9]+)% (?<h>[0-9]+)h(?<m>[0-9]+)m")) as $h
-      | ($t|capture("7-Day (?<p>[0-9]+)% (?<d>[0-9]+)d(?<hh>[0-9]+)h")) as $w
-      | ($n + ($h.h|tonumber)*3600 + ($h.m|tonumber)*60) as $he
-      | ($n + ($w.d|tonumber)*86400 + ($w.hh|tonumber)*3600) as $we
-      | ($h.p|tonumber) as $hp
-      | ($w.p|tonumber) as $wp
-      | (($hp/100*$width)|round) as $hf
-      | (($wp/100*$width)|round) as $wf
-      | "<b>󱐋  5h</b>  │  <font size=\"5\"><b>\($hp)%</b></font>  │  <font size=\"4\">"
-        + ("█"*$hf) + ("░"*($width-$hf))
-        + "</font><br><i>  \($h.h)h \($h.m)m left  ·  \($he|strflocaltime("%a %-d %b · %H:%M"))</i>"
-        + "<br><br><b>󰃭 · 7d</b>  │  <font size=\"5\"><b>\($wp)%</b></font>  │  <font size=\"4\">"
-        + ("█"*$wf) + ("░"*($width-$wf))
-        + "</font><br><i>  \($w.d)d \($w.hh)h left  ·  \($we|strflocaltime("%a %-d %b · %H:%M"))</i>"
-    )
-    catch (
-      .tooltip // .text // "Unable to parse usage output"
-    )
+    def words($s):
+      $s | gsub("^ +| +$"; "") | split(" ") | map(select(length > 0));
+
+    def capnum($s; $re; $name):
+      (($s | capture($re)? // {})[$name] // "0") | tonumber;
+
+    def p5($s): {
+      h: capnum($s; "(?<h>[0-9]+)h"; "h"),
+      m: capnum($s; "(?<m>[0-9]+)m"; "m"),
+      sec: capnum($s; "(?<sec>[0-9]+)s"; "sec")
+    };
+
+    def p7($s): {
+      d: capnum($s; "(?<d>[0-9]+)d"; "d"),
+      h: capnum($s; "(?<h>[0-9]+)h"; "h")
+    };
+
+    def bar($p; $w):
+      (($p / 100 * $w) | round) as $f
+      | ("█" * $f) + ("░" * ($w - $f));
+
+    .tooltip
+    | split("\n")
+    | map(gsub("^ +| +$"; ""))
+    | map(select(startswith("5-Hour") or startswith("7-Day"))) as $rows
+    | ($rows[] | select(startswith("5-Hour")) | words(.)) as $hrow
+    | ($rows[] | select(startswith("7-Day")) | words(.)) as $wrow
+    | ($hrow[1] | rtrimstr("%") | tonumber) as $hp
+    | ($wrow[1] | rtrimstr("%") | tonumber) as $wp
+    | ($hrow[2]) as $hr
+    | ($wrow[2]) as $wr
+    | (p5($hr)) as $h
+    | (p7($wr)) as $w
+    | (($h.h * 60 + $h.m) * 60 + $h.sec) as $hsecs
+    | (($w.d * 86400) + ($w.h * 3600)) as $wsecs
+    | now as $n
+    | ($n + $hsecs) as $he
+    | ($n + $wsecs) as $we
+    | (if $h.h > 0 then "\($h.h)h \($h.m)m left" elif $h.m > 0 then "\($h.m)m left" else "\($h.sec)s left" end) as $hleft
+    | "<b>󱐋 5h</b>  │  <font size=\"5\"><b>\($hp)%</b></font>  │  <font size=\"4\">"
+      + bar($hp; $width)
+      + "</font><br><i>  \($hleft) · \($he|strflocaltime("%a %-d %b · %H:%M"))</i>"
+      + "<br><br><b>󰃭 · 7d</b>  │  <font size=\"5\"><b>\($wp)%</b></font>  │  <font size=\"4\">"
+      + bar($wp; $width)
+      + "</font><br><i>  \($w.d)d \($w.h)h left · \($we|strflocaltime("%a %-d %b · %H:%M"))</i>"
   ' <<< "$raw")"
 
   notify-send "✦ $title" "$body"
@@ -84,7 +106,7 @@ notify_zai() {
     | (($w.nextResetTime // 0)/1000) as $wt
     | (if $ht>0 then "\((($ht-$n)/3600)|floor)h left  ·  \($ht|strflocaltime("%a %-d %b · %H:%M"))" else "just reset · full quota" end) as $hr
     | (if $wt>0 then "\((($wt-$n)/86400)|floor)d left  ·  \($wt|strflocaltime("%a %-d %b · %H:%M"))" else "just reset · full quota" end) as $wr
-    | "<b>󱐋  5h</b>  │  <font size=\"5\"><b>\($hp)%</b></font>  │  <font size=\"4\">"
+    | "<b>󱐋 5h</b>  │  <font size=\"5\"><b>\($hp)%</b></font>  │  <font size=\"4\">"
       + ("█"*$hf) + ("░"*(14-$hf))
       + "</font><br><i>  \($hr)</i><br><br><b>󰃭 · 7d</b>  │  <font size=\"5\"><b>\($wp)%</b></font>  │  <font size=\"4\">"
       + ("█"*$wf) + ("░"*(14-$wf))

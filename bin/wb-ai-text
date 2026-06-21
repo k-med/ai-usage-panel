@@ -96,23 +96,13 @@ tooltip_metrics() {
       (($p / 100 * $w) | round) as $f
       | ("▰" * $f) + ("▱" * ($w - $f));
 
-    "Mode \($mode) · \(risk)
-
-"
-    + "󱐋 5h   \(.h5_pct)%   " + bar(.h5_pct; 12) + "
-"
-    + "         \(.h5_exact) left
-
-"
-    + "󰃭 · 7d   \(.d7_pct)%   " + bar(.d7_pct; 12) + "
-"
+    "Mode \($mode) · \(risk)\n\n"
+    + "󱐋 5h   \(.h5_pct)%   " + bar(.h5_pct; 12) + "\n"
+    + "         \(.h5_exact) left\n\n"
+    + "󰃭 · 7d   \(.d7_pct)%   " + bar(.d7_pct; 12) + "\n"
     + "         \(.d7_exact) left"
-    + (if .peak != null then "
-
-" + .peak else "" end)
-    + "
-
-L details · R mode · M settings · Wheel cycle"
+    + (if .peak != null then "\n\n" + .peak else "" end)
+    + "\n\nL details · R mode · M settings · Wheel cycle"
   ' <<< "$metrics"
 }
 
@@ -126,19 +116,43 @@ metrics_claude_codex() {
   fi
 
   LC_TIME=C jq -c '
+    def words($s):
+      $s | gsub("^ +| +$"; "") | split(" ") | map(select(length > 0));
+
+    def capnum($s; $re; $name):
+      (($s | capture($re)? // {})[$name] // "0") | tonumber;
+
+    def p5($s): {
+      h: capnum($s; "(?<h>[0-9]+)h"; "h"),
+      m: capnum($s; "(?<m>[0-9]+)m"; "m"),
+      sec: capnum($s; "(?<sec>[0-9]+)s"; "sec")
+    };
+
+    def p7($s): {
+      d: capnum($s; "(?<d>[0-9]+)d"; "d"),
+      h: capnum($s; "(?<h>[0-9]+)h"; "h")
+    };
+
     .tooltip
-    | gsub("\n"; " ")
-    | gsub("  +"; " ") as $t
-    | ($t|capture("5-Hour (?<p>[0-9]+)% (?<h>[0-9]+)h(?<m>[0-9]+)m")) as $h
-    | ($t|capture("7-Day (?<p>[0-9]+)% (?<d>[0-9]+)d(?<hh>[0-9]+)h")) as $w
+    | split("\n")
+    | map(gsub("^ +| +$"; ""))
+    | map(select(startswith("5-Hour") or startswith("7-Day"))) as $rows
+    | ($rows[] | select(startswith("5-Hour")) | words(.)) as $hrow
+    | ($rows[] | select(startswith("7-Day")) | words(.)) as $wrow
+    | ($hrow[1] | rtrimstr("%") | tonumber) as $hp
+    | ($wrow[1] | rtrimstr("%") | tonumber) as $wp
+    | ($hrow[2]) as $hr
+    | ($wrow[2]) as $wr
+    | (p5($hr)) as $h
+    | (p7($wr)) as $w
     | {
-        h5_pct: ($h.p|tonumber),
-        h5_left_h: (($h.h|tonumber) + (if ($h.m|tonumber) >= 30 then 1 else 0 end)),
-        h5_exact: "\($h.h)h \($h.m)m",
-        d7_pct: ($w.p|tonumber),
-        d7_left_d: ($w.d|tonumber),
-        d7_left_h: ($w.hh|tonumber),
-        d7_exact: "\($w.d)d \($w.hh)h",
+        h5_pct: $hp,
+        h5_left_h: ($h.h + (if $h.m >= 30 then 1 else 0 end)),
+        h5_exact: (if $h.h > 0 then "\($h.h)h \($h.m)m" elif $h.m > 0 then "\($h.m)m" else "\($h.sec)s" end),
+        d7_pct: $wp,
+        d7_left_d: ($w.d),
+        d7_left_h: ($w.h),
+        d7_exact: "\($w.d)d \($w.h)h",
         peak: null
       }
   ' <<< "$raw"
