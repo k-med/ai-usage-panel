@@ -105,11 +105,21 @@ It also patches the local `waybar-ai-usage` install so auth failures do not auto
 
 See:
 
+<img width="1042" height="1004" alt="image" src="https://github.com/user-attachments/assets/3dfafb47-9390-4c33-8082-7e99cef67540" />
+
+
 ```text
 examples/noctalia-custombutton.md
 ```
 
 Short version for each button:
+
+<img width="800" height="706" alt="image" src="https://github.com/user-attachments/assets/99ee2d55-5d45-451b-bd03-d215917ee819" />
+
+<img width="805" height="772" alt="image" src="https://github.com/user-attachments/assets/ca7b3e26-8aca-45d6-ac96-14c32d684df4" />
+
+<img width="803" height="701" alt="image" src="https://github.com/user-attachments/assets/efe27e22-b45a-4617-8e3e-2ad9d1760247" />
+
 
 ```text
 Display command: ~/.local/bin/wb-ai-text SERVICE
