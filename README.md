@@ -1,3 +1,11 @@
+<img width="484" height="36" alt="Image" src="https://github.com/user-attachments/assets/9a310249-65ab-445a-9090-f52a574d6510" />
+
+
+<img width="383" height="260" alt="Image" src="https://github.com/user-attachments/assets/893439a9-9f6d-42c3-a821-6a8f3fc13e6f" />
+
+
+<img width="974" height="288" alt="Image" src="https://github.com/user-attachments/assets/85c8cff6-2807-4816-ae82-8a1d2ee45b61" />
+
 # AI Usage Panel
 
 Stateful desktop panel widgets for monitoring AI coding assistant quota usage.
