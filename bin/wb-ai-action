@@ -8,9 +8,9 @@ mkdir -p "$CACHE_DIR"
 if [[ ! -s "$STATE" ]]; then
   cat > "$STATE" <<'JSON'
 {
-  "claude": {"mode": "auto"},
-  "codex": {"mode": "auto"},
-  "zai": {"mode": "auto"}
+  "claude": {"mode": "compact"},
+  "codex": {"mode": "compact"},
+  "zai": {"mode": "compact"}
 }
 JSON
 fi
@@ -19,10 +19,10 @@ svc="${1:-}"
 action="${2:-notify}"
 arg="${3:-}"
 
-modes=(auto 5h 7d dual eta risk)
+modes=(compact auto 5h 7d dual eta risk)
 
 get_mode() {
-  jq -r --arg svc "$svc" '.[$svc].mode // "auto"' "$STATE" 2>/dev/null
+  jq -r --arg svc "$svc" '.[$svc].mode // "compact"' "$STATE" 2>/dev/null
 }
 
 set_mode() {

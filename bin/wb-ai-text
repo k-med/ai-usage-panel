@@ -8,9 +8,9 @@ mkdir -p "$CACHE_DIR"
 if [[ ! -s "$STATE" ]]; then
   cat > "$STATE" <<'JSON'
 {
-  "claude": {"mode": "auto"},
-  "codex": {"mode": "auto"},
-  "zai": {"mode": "auto"}
+  "claude": {"mode": "compact"},
+  "codex": {"mode": "compact"},
+  "zai": {"mode": "compact"}
 }
 JSON
 fi
@@ -27,7 +27,7 @@ emit_json() {
 }
 
 get_mode() {
-  jq -r --arg svc "$svc" '.[$svc].mode // "auto"' "$STATE" 2>/dev/null
+  jq -r --arg svc "$svc" '.[$svc].mode // "compact"' "$STATE" 2>/dev/null
 }
 
 class_from_max() {
@@ -60,7 +60,9 @@ render_metrics() {
       else "OK"
       end;
 
-    if $mode == "5h" then
+    if $mode == "compact" then
+      "\(.h5_pct)%\(.h5_left_h)h|\(.d7_pct)%\(.d7_left_d)d"
+    elif $mode == "5h" then
       "\(.h5_pct)% \(.h5_left_h)/5"
     elif $mode == "7d" then
       "\(.d7_pct)% \(.d7_left_d)/7"

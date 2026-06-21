@@ -1,0 +1,5 @@
+# .agents/ git policy: HOT memory is tracked; WARM + COLD are operational (ignored).
+HANDOFF.md
+log/
+CONTEXT.md
+transcripts/

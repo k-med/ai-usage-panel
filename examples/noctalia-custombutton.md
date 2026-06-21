@@ -121,12 +121,13 @@ Scroll wheel:
 Right click or scroll cycles through:
 
 ```text
-auto -> 5h -> 7d -> dual -> eta -> risk
+compact -> auto -> 5h -> 7d -> dual -> eta -> risk
 ```
 
 Examples:
 
 ```text
+45%1h|40%2d
 45% 1/5
 40% 2/7
 45/40
